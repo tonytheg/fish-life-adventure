@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fish Life Adventure</title>
+  <style>
+    html, body { margin:0; height:100%; background:#06121b; display:flex; align-items:center; justify-content:center; }
+    canvas { border: 4px solid #163042; background:#0b2236; image-rendering: pixelated; }
+  </style>
+</head>
+<body>
+<canvas id="game" width="320" height="180"></canvas>
+
+<script>
+(() => {
+  "use strict";
+
+  // Canvas
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  const SCALE = 3;
+  canvas.style.width = (canvas.width * SCALE) + "px";
+  canvas.style.height = (canvas.height * SCALE) + "px";
+
+  const W = canvas.width, H = canvas.height;
+
+  // Game Settings
+  const SPEED_SCALE = 0.8;
+  const GAME_SECONDS = 180;
+  const BOSS_START_AT = 30;
+
+  const MAX_HP = 100;
+  const MAX_O2 = 100;
+  const HP_REGEN_AT_FULL_O2 = 2.2;
+  const SHARK_HIT_DAMAGE = MAX_HP * 0.25; // 25% of player max HP per hit
+
+  // Helpers
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const randi = (a, b) => (a + Math.floor(Math.random() * (b - a + 1)));
+  const randf = (a, b) => (a + Math.random() * (b - a));
+  const dist2 = (ax, ay, bx, by) => { const dx=ax-bx, dy=ay-by; return dx*dx+dy*dy; };
+  const now = () => performance.now() / 1000;
+
+  function aabb(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // Input
+  const keys = new Set();
+  window.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (["arrowup","arrowdown","arrowleft","arrowright","w","a","s","d"," "].includes(k)) e.preventDefault();
+    keys.add(k);
+  }, { passive:false });
+  window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+
+  // State
+  let state = "menu";
+  let timeLeft = GAME_SECONDS;
+  let lastTs = 0;
+  let loseReason = "pollution";
+
+  // Tips UI
+  const SHOW_TIPS = true;
+  const tip = { text:"", t:0, cooldown:0 };
+  function showTip(text, seconds=1.6) {
+    if (!SHOW_TIPS) return;
+    if (tip.cooldown > 0) return;
+    tip.text = text;
+    tip.t = seconds;
+    tip.cooldown = 6.0;
+  }
+  function updateTip(dt) {
+    tip.t = Math.max(0, tip.t - dt);
+    tip.cooldown = Math.max(0, tip.cooldown - dt);
+    if (tip.t <= 0) tip.text = "";
+  }
+
+  // Player's Fish
+  const fish = {
+    x: 56, y: 92,
+    hp: MAX_HP,
+    o2: MAX_O2,
+    invuln: 0,
+    blind: 0,
+    stun: 0,
+    speedBase: 70 * SPEED_SCALE,
+    facing: 1,
+    lastX: 56, lastY: 92,
+    campTimer: 0,
+    swallowed: false,
+  };
+
+  // Boss Shark
+  const boss = {
+    active: false,
+    spawned: false,
+    warningTimer: 0,
+    x: 0, y: 0,
+    facing: 1,
+    speed: 0,
+    hitsToKill: 4,
+    fishHits: 0,
+    restTimer: 0,
+    swallowT: 0,
+    forceSwallow: false,
+  };
+
+  // World Objects
+  const rocks = [];
+  const plants = [];
+  const bubbles = [];
+  const foods = [];
+  const dirties = [];
+  const trashes = [];
+  const currents = [];
+  const blooms = [];
+
+  // Spawn Timers
+  let tBubble=0, tFood=0, tTrash=0, tDirty=0, tCurrent=0, tBloom=0, tPlantMove=0;
+
+  // Drawing Helpers
+  function px(x,y,c){ ctx.fillStyle=c; ctx.fillRect(x|0,y|0,1,1); }
+
+  function drawReadableText(text, x, y, color="#eaf6ff", size=14, align="center") {
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.font = `${size}px system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  // Fish Sprite
+  function drawFishAt(x0, y0, facing) {
+    const x = x0|0, y = y0|0, f = facing;
+    const c1="#ffb24a", c2="#ff7f1f", c3="#cc4f10";
+    function p(dx,dy,c){ px(x+dx*f, y+dy, c); }
+    p(-4,3,c3); p(-5,2,c3); p(-5,3,c2); p(-5,4,c3); p(-4,4,c2);
+    p(-3,2,c3); p(-2,2,c2); p(-1,2,c2); p(0,2,c1); p(1,2,c2); p(2,2,c3);
+    p(-3,3,c2); p(-2,3,c1); p(-1,3,c1); p(0,3,c1); p(1,3,c1); p(2,3,c2); p(3,3,c3);
+    p(-3,4,c3); p(-2,4,c2); p(-1,4,c1); p(0,4,c1); p(1,4,c2); p(2,4,c3);
+    p(-1,1,"#ffd9a3"); p(0,1,"#ffd9a3"); p(1,1,"#ffb24a");
+    p(2,3,"#0a0a0a"); p(3,3,"#ffffff");
+  }
+
+  function drawFish() {
+    if (fish.swallowed) return;
+    drawFishAt(fish.x, fish.y, fish.facing);
+    if (fish.invuln > 0 && Math.floor(now()*12)%2===0) {
+      px(((fish.x|0) + (4*fish.facing))|0, (fish.y|0) + 2, "rgba(255,255,255,0.35)");
+      px(((fish.x|0) + (4*fish.facing))|0, (fish.y|0) + 3, "rgba(255,255,255,0.35)");
+    }
+  }
+
+  // Rock / Plant / Items
+  function drawRock(r) {
+    const x=r.x|0, y=r.y|0;
+    const mask = [
+      "   ..####..   ",
+      "  .########.  ",
+      " .##########. ",
+      ".############.",
+      "##############",
+      "#############.",
+      ".############.",
+      " .##########. ",
+      "  .########.  ",
+      "   ..####..   "
+    ];
+    for (let yy=0; yy<mask.length; yy++) {
+      for (let xx=0; xx<mask[yy].length; xx++) {
+        const ch = mask[yy][xx];
+        if (ch === "#") {
+          const shade = (xx + yy) / 26;
+          let c = "#6a7b86";
+          if (shade > 0.64) c="#3a4750";
+          else if (shade > 0.48) c="#4f5f68";
+          else if (shade > 0.34) c="#5d6e78";
+          px(x+xx, y+yy, c);
+          if (Math.random()<0.05) px(x+xx, y+yy, "#2a3338");
+          if (Math.random()<0.03) px(x+xx, y+yy, "#8fa0aa");
+        } else if (ch === ".") {
+          if (Math.random() < 0.25) px(x+xx, y+yy, "#23303a");
+        }
+      }
+    }
+  }
+
+  function drawPlant(p, t) {
+    const x=p.x|0, y=p.y|0;
+    const sway = Math.sin(t*1.2 + p.seed) * 2;
+    px(x, y, "#2a6f4f"); px(x+1, y, "#1e5c3f"); px(x+2, y, "#2a6f4f");
+    for (let i=0; i<5; i++) {
+      const sx = x + i*2;
+      for (let yy=0; yy<7; yy++) {
+        const dx = ((yy%2===0)?1:0) + Math.round(sway*0.2);
+        px(sx+dx, y-yy, (yy<2) ? "#3fd48b" : "#2a9b66");
+        if (Math.random()<0.10) px(sx+dx+1, y-yy, "#1c6b46");
+      }
+    }
+  }
+
+  function drawBubble(b) {
+    const x=b.x|0, y=b.y|0;
+    px(x, y, "#dff9ff"); px(x+1, y, "#9fe6ff");
+    px(x, y+1, "#9fe6ff"); px(x+1, y+1, "#5db9ff");
+  }
+
+  function drawFood(f) {
+    const x=f.x|0, y=f.y|0;
+    px(x, y, "#c58b3b"); px(x+1, y, "#8a5a24"); px(x, y+1, "#8a5a24");
+  }
+
+  // Trash Drawing
+  function drawSprite(lines, ox, oy, colorFn) {
+    for (let yy=0; yy<lines.length; yy++) {
+      for (let xx=0; xx<lines[yy].length; xx++) {
+        if (lines[yy][xx] === "#") {
+          px(ox+xx, oy+yy, colorFn(xx,yy));
+          if (Math.random()<0.04) px(ox+xx, oy+yy, "rgba(0,0,0,0.16)");
+        }
+      }
+    }
+  }
+  function bottleColor(xx, yy, seed) {
+    const h = (xx===1||xx===2) ? "#b7f2ff" : "#5fbdd7";
+    const s = ((xx+yy+seed)%7===0) ? "#2f6f82" : h;
+    if (yy<=1) return "#d7f9ff";
+    if (yy===7) return "#3a8ea5";
+    return s;
+  }
+  function canColor(xx, yy, seed) {
+    if (xx===1) return "#f2f2f2";
+    if (xx===2) return "#bfbfbf";
+    if ((yy+seed)%5===0) return "#8a8a8a";
+    return "#a6a6a6";
+  }
+  function bagColor(xx, yy, seed) {
+    if ((xx+yy+seed)%6===0) return "#f7f7f7";
+    if (yy===0||yy===5) return "#e8e8e8";
+    return "#d7d7d7";
+  }
+  function netColor(xx, yy, seed) {
+    if ((xx+yy+seed)%4===0) return "#6b4a2c";
+    return "#855c33";
+  }
+  function drawTrash(t) {
+    const x=t.x|0, y=t.y|0;
+    if (t.type==="bottle") {
+      const spr=[" .##. "," .##. "," #### "," #### "," #### "," #### "," .##. "," .##. "];
+      drawSprite(spr, x, y, (xx,yy)=>bottleColor(xx,yy,t.seed));
+    } else if (t.type==="can") {
+      const spr=["#####","####.","####.","####.","####.","#####"];
+      drawSprite(spr, x, y, (xx,yy)=>canColor(xx,yy,t.seed));
+    } else if (t.type==="bag") {
+      const spr=["..####..","########","##....##","########","##....##","..####.."];
+      drawSprite(spr, x, y, (xx,yy)=>bagColor(xx,yy,t.seed));
+    } else if (t.type==="net") {
+      const spr=["#########","#.#.#.#.#","#########","#.#.#.#.#","#########","#.#.#.#.#","#########"];
+      drawSprite(spr, x, y, (xx,yy)=>netColor(xx,yy,t.seed));
+    }
+  }
+
+  // Zones / Effects
+  function drawDirty(d) {
+    const x=d.x|0, y=d.y|0, r=d.r|0;
+    for (let yy=-r; yy<=r; yy++) for (let xx=-r; xx<=r; xx++) {
+      if (xx*xx + yy*yy <= r*r) {
+        if (((x+xx)+(y+yy))%2===0) px(x+xx, y+yy, "rgba(0,0,0,0.14)");
+        else if (Math.random()<0.22) px(x+xx, y+yy, "rgba(0,0,0,0.22)");
+      }
+    }
+  }
+
+  function drawCurrent(c, t) {
+    const x=c.x|0, y=c.y|0;
+    const phase = Math.floor(t*6)%4;
+    const col = (phase<2) ? "#7ff0ff" : "#a8f6ff";
+    for (let i=0; i<c.w; i+=10) {
+      px(x+i+2, y+1, col); px(x+i+3, y+1, col); px(x+i+4, y+1, col);
+      px(x+i+4, y, col); px(x+i+4, y+2, col);
+      px(x+i+5, y+1, col);
+    }
+  }
+
+  function drawBloom(b) {
+    const x=b.x|0, y=b.y|0, r=b.r|0;
+    for (let yy=-r; yy<=r; yy++) for (let xx=-r; xx<=r; xx++) {
+      const d = xx*xx + yy*yy;
+      if (d <= r*r && d >= (r-2)*(r-2)) {
+        if (((x+xx)+(y+yy))%2===0) px(x+xx, y+yy, "rgba(53,255,176,0.26)");
+      }
+    }
+  }
+
+  // Boss Shark Drawing
+  function drawShark() {
+    if (!boss.active) return;
+
+    const sx = boss.x|0, sy = boss.y|0, f = boss.facing;
+    const h1="#cfe3ea", h2="#8aa6b2", h3="#4c6470", h4="#2b3b43";
+    function p(dx,dy,c){ px(sx + dx*f, sy + dy, c); }
+
+    for (let yy=-14; yy<=14; yy++) {
+      const w = Math.floor(22 - Math.abs(yy)*0.8);
+      for (let xx=-w; xx<=w; xx++) {
+        const shade = (xx + yy*0.6) / 40;
+        let c = h2;
+        if (shade > 0.25) c = h3;
+        if (shade > 0.48) c = h4;
+        if (shade < -0.15) c = h1;
+        p(xx, yy, c);
+        if (Math.random()<0.015) p(xx, yy, "#1a2328");
+      }
+    }
+
+    for (let yy=-8; yy<=8; yy++) {
+      for (let xx=0; xx<=10; xx++) {
+        if (Math.abs(yy) < 8 - Math.floor(xx*0.6)) p(-26-xx, yy, (xx<4) ? h3 : h4);
+      }
+    }
+
+    for (let i=0; i<12; i++) for (let j=0; j<i; j++) p(-4 + j, -16 + i, (i<6) ? h2 : h3);
+
+    for (let xx=10; xx<=22; xx++) { p(xx, 6, h4); if (xx%2===0) p(xx, 7, "#f3f6f8"); }
+
+    p(14, -3, "#0b0f12");
+    p(15, -3, "#eaf6ff");
+  }
+
+  function drawBlindOverlay() {
+    if (fish.blind <= 0) return;
+    const a = clamp(0.55 + (fish.blind/3)*0.25, 0.55, 0.80);
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${a})`;
+    ctx.fillRect(0,0,W,H);
+    const r = 26;
+    const g = ctx.createRadialGradient(fish.x, fish.y, 2, fish.x, fish.y, r);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, `rgba(0,0,0,${a})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+  }
+
+  // HUD
+  function drawUI(t) {
+    ctx.fillStyle="#2a0b0b"; ctx.fillRect(8, 6, 104, 6);
+    ctx.fillStyle="#ff3a3a"; ctx.fillRect(9, 7, Math.floor((fish.hp/MAX_HP)*102), 4);
+
+    ctx.fillStyle="#062a2f"; ctx.fillRect(8, 14, 104, 6);
+    ctx.fillStyle="#2fe7ff"; ctx.fillRect(9, 15, Math.floor((fish.o2/MAX_O2)*102), 4);
+
+    const tl = Math.max(0, timeLeft);
+    const m = Math.floor(tl/60);
+    const s = Math.floor(tl%60).toString().padStart(2,"0");
+    ctx.fillStyle="#e8f2ff";
+    ctx.font="8px monospace";
+    ctx.fillText(`TIME ${m}:${s}`, 225, 12);
+
+    if (fish.stun>0) { ctx.fillStyle="#ffd27a"; ctx.fillText("TRAPPED", 225, 22); }
+    if (boss.active) {
+      ctx.fillStyle="#ffd27a";
+    }
+
+    if (tip.text && tip.t > 0) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      const boxW = 250, boxH = 18;
+      const bx = 6, by = H - boxH - 6;
+      ctx.fillStyle = "rgba(0,0,0,0.40)";
+      ctx.fillRect(bx, by, boxW, boxH);
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.strokeRect(bx+0.5, by+0.5, boxW-1, boxH-1);
+      ctx.font = "11px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tip.text, bx+8, by + boxH/2);
+      ctx.restore();
+    }
+
+    if (boss.warningTimer > 0.01) {
+      drawReadableText("Warning!!! Shark is coming", W/2, 40, "#ffdf6a", 14);
+    }
+  }
+
+  // Background
+  function drawBackground(t) {
+    for (let y=0; y<H; y++) {
+      ctx.fillStyle = (y/H < 0.5) ? "#0b2f4d" : "#082339";
+      ctx.fillRect(0, y, W, 1);
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    for (let i=0; i<10; i++) {
+      const x = ((i*40 + Math.floor(t*10)) % (W+40)) - 20;
+      ctx.fillStyle = "#bfefff";
+      ctx.fillRect(x, 0, 6, H);
+    }
+    ctx.restore();
+    ctx.fillStyle = "#3b2a1b";
+    ctx.fillRect(0, H-18, W, 18);
+    for (let i=0; i<180; i++) px(randi(0,W-1), randi(H-18,H-1), (Math.random()<0.5) ? "#5a3f28" : "#2b1d13");
+  }
+
+  // Reset Game
+  function resetGame() {
+    timeLeft = GAME_SECONDS;
+    loseReason = "pollution";
+
+    fish.x=56; fish.y=92;
+    fish.hp=MAX_HP; fish.o2=MAX_O2;
+    fish.invuln=0; fish.blind=0; fish.stun=0;
+    fish.facing=1;
+    fish.lastX=fish.x; fish.lastY=fish.y;
+    fish.campTimer=0;
+    fish.swallowed=false;
+
+    boss.active=false; boss.spawned=false; boss.warningTimer=0;
+    boss.x=0; boss.y=0; boss.facing=1;
+    boss.speed=0; boss.fishHits=0; boss.restTimer=0; boss.swallowT=0;
+    boss.forceSwallow=false;
+
+    rocks.length=0; plants.length=0; bubbles.length=0; foods.length=0;
+    dirties.length=0; trashes.length=0; currents.length=0; blooms.length=0;
+
+    for (let i=0; i<6; i++) rocks.push({ x:randi(55, 285), y:randi(55, 135) });
+    for (let i=0; i<4; i++) plants.push({ x:randi(18, 298), y:randi(75, 170), aura:randi(16, 22), seed:randf(0,10) });
+
+    dirties.push({ x: 250, y: 75, r: 16, vx: -8*SPEED_SCALE, vy: 5*SPEED_SCALE, life: 9999 });
+    currents.push({ x: 30, y: 40, w: 90, h: 4, pushX: 18*SPEED_SCALE, pushY: 0, life: 9999 });
+    currents.push({ x: 120, y: 120, w: 80, h: 4, pushX: -15*SPEED_SCALE, pushY: 0, life: 9999 });
+    blooms.push({ x:randi(40, 280), y:randi(35, 145), r: 12, life: 18, vx: randf(-10,10)*SPEED_SCALE, vy: randf(-10,10)*SPEED_SCALE });
+
+    tBubble=0.4; tFood=1.6; tTrash=0.8; tDirty=5.0; tCurrent=10.0; tBloom=9.0; tPlantMove=14.0;
+
+    tip.text=""; tip.t=0; tip.cooldown=0;
+    showTip("Tip: Follow the green ring for extra oxygen.", 2.0);
+  }
+
+  // Gameplay helpers
+  function updateCamping(dt) {
+    const dx = fish.x - fish.lastX;
+    const dy = fish.y - fish.lastY;
+    const moved = Math.sqrt(dx*dx + dy*dy);
+    fish.lastX = fish.x;
+    fish.lastY = fish.y;
+
+    if (moved < 0.30) fish.campTimer += dt;
+    else fish.campTimer = Math.max(0, fish.campTimer - dt*0.8);
+
+    if (fish.campTimer > 6.0) {
+      fish.o2 = clamp(fish.o2 - 4*dt, 0, MAX_O2);
+      if (Math.random() < 0.01) showTip("Explore to find oxygen in different areas.", 1.6);
+    }
+  }
+
+  // Spawns
+  function spawnBubble() {
+    const MIN_DIST = 65;
+    let bx=0, by=0, tries=0;
+    do {
+      if (Math.random() < 0.60 && plants.length>0) {
+        const p = plants[randi(0, plants.length-1)];
+        bx = p.x + randi(-6, 6);
+        by = p.y + randi(-6, 6);
+      } else {
+        bx = randi(20, W-20);
+        by = randi(30, H-30);
+      }
+      tries++;
+      if (tries > 15) break;
+    } while (dist2(bx, by, fish.x, fish.y) < MIN_DIST*MIN_DIST);
+
+    bubbles.push({ x: bx, y: by, vx: randf(-3, 3)*SPEED_SCALE, vy: randf(-14, -20)*SPEED_SCALE, value: randi(8, 12) });
+  }
+
+  function spawnFood() {
+    const side = randi(0,3);
+    let x,y,vx,vy;
+    if (side===0){ x=-8; y=randi(25,H-25); vx=randf(18,30)*SPEED_SCALE; vy=randf(-2.5,2.5)*SPEED_SCALE; }
+    else if (side===1){ x=W+8; y=randi(25,H-25); vx=randf(-30,-18)*SPEED_SCALE; vy=randf(-2.5,2.5)*SPEED_SCALE; }
+    else if (side===2){ x=randi(25,W-25); y=-8; vx=randf(-2.5,2.5)*SPEED_SCALE; vy=randf(18,30)*SPEED_SCALE; }
+    else { x=randi(25,W-25); y=H+8; vx=randf(-2.5,2.5)*SPEED_SCALE; vy=randf(-30,-18)*SPEED_SCALE; }
+    foods.push({ x,y,vx,vy, value:randi(10, 16) });
+  }
+
+  function spawnTrash() {
+    const types = ["bottle","can","bag","net"];
+    const type = types[randi(0, types.length-1)];
+
+    let dmg=9;
+    if (type==="bottle") dmg=randi(7,10);
+    if (type==="can") dmg=randi(13,18);
+    if (type==="bag") dmg=randi(7,10);
+    if (type==="net") dmg=randi(6,9);
+
+    let w=5, h=6, vxMin=-26, vxMax=-40, vyMin=-6, vyMax=6;
+    if (type==="bottle") { w=5; h=8; vxMin=-20; vxMax=-32; vyMin=-4; vyMax=4; }
+    if (type==="can")    { w=5; h=6; vxMin=-30; vxMax=-50; vyMin=-6; vyMax=6; }
+    if (type==="bag")    { w=8; h=6; vxMin=-14; vxMax=-26; vyMin=-3; vyMax=3; }
+    if (type==="net")    { w=9; h=7; vxMin=-12; vxMax=-22; vyMin=-2; vyMax=2; }
+
+    trashes.push({
+      x: W + 10,
+      y: randi(22, H-30),
+      vx: randf(vxMax, vxMin)*SPEED_SCALE,
+      vy: randf(vyMin, vyMax)*SPEED_SCALE,
+      type, dmg,
+      seed: randi(0,9999),
+      w, h
+    });
+  }
+
+  function spawnDirty() {
+    dirties.push({ x: W + randi(18, 40), y: randi(35, H-35), r: randi(12, 18),
+      vx: randf(-7, -14)*SPEED_SCALE, vy: randf(-8, 8)*SPEED_SCALE, life: randi(14, 22) });
+  }
+
+  function spawnCurrent() {
+    currents.push({ x: randi(20, W-120), y: randi(28, H-28), w: randi(60, 110), h: 4,
+      pushX: (Math.random()<0.5 ? 1 : -1) * randi(10, 22)*SPEED_SCALE, pushY: randi(-6, 6)*SPEED_SCALE,
+      life: randi(10, 14) });
+  }
+
+  function spawnBloom() {
+    blooms.push({ x: randi(35, W-35), y: randi(30, H-30), r: randi(10, 14), life: randi(14, 18),
+      vx: randf(-10, 10)*SPEED_SCALE, vy: randf(-10, 10)*SPEED_SCALE });
+    if (Math.random() < 0.25) showTip("Oxygen bloom moved. Find the green ring.", 1.6);
+  }
+
+  function movePlantsRandomly() {
+    for (const p of plants) { p.x = randi(18, W-18); p.y = randi(75, H-10); p.aura = randi(16, 22); }
+    if (Math.random() < 0.18) showTip("Plants can be in different places.", 1.6);
+  }
+
+  // Mechanics
+  function phase() {
+    const played = GAME_SECONDS - timeLeft;
+    if (played < 60) return 1;
+    if (played < 120) return 2;
+    return 3;
+  }
+
+  function fishRect(){ return { x:fish.x-4, y:fish.y-3, w:9, h:6 }; }
+
+  function resolveFishVsRocks(oldX, oldY) {
+    const fr = fishRect();
+    for (const r of rocks) {
+      const rb = { x:r.x, y:r.y, w:14, h:10 };
+      if (aabb(fr, rb)) { fish.x=oldX; fish.y=oldY; return; }
+    }
+  }
+
+  function applyCurrents(dt) {
+    for (const c of currents) {
+      const inside = fish.x >= c.x && fish.x <= c.x + c.w && fish.y >= c.y-2 && fish.y <= c.y + c.h+2;
+      if (inside) { fish.x += c.pushX*dt; fish.y += c.pushY*dt; }
+    }
+  }
+
+  function plantO2(dt) {
+    for (const p of plants) {
+      const cx=p.x+4, cy=p.y-3;
+      const d = Math.sqrt(dist2(fish.x, fish.y, cx, cy));
+      if (d < p.aura) fish.o2 = clamp(fish.o2 + 7.5*dt, 0, MAX_O2);
+    }
+  }
+
+  function bloomO2(dt) {
+    for (const b of blooms) {
+      const d = Math.sqrt(dist2(fish.x, fish.y, b.x, b.y));
+      if (d < b.r) fish.o2 = clamp(fish.o2 + 25*dt, 0, MAX_O2);
+    }
+  }
+
+  function dirtyEffect(dt) {
+    for (const d of dirties) {
+      if (dist2(fish.x, fish.y, d.x, d.y) < d.r*d.r) {
+        fish.o2 = clamp(fish.o2 - 12*dt, 0, MAX_O2);
+        fish.hp = clamp(fish.hp - 1.4*dt, 0, MAX_HP);
+      }
+    }
+  }
+
+  function applyTrashEffect(t) {
+    if (t.type === "bag") {
+      fish.blind = Math.max(fish.blind, 3.0);
+      showTip("Plastic bags can block vision.", 1.6);
+    } else if (t.type === "can") {
+      showTip("Cans can cause serious injury.", 1.6);
+    } else if (t.type === "net") {
+      fish.stun = Math.max(fish.stun, 3.0);
+      showTip("Nets can trap fish.", 1.6);
+    } else {
+      if (Math.random()<0.25) showTip("Trash lowers water quality.", 1.6);
+    }
+  }
+
+  function hitTrash(t) {
+    if (fish.invuln > 0) return;
+    fish.hp = clamp(fish.hp - t.dmg, 0, MAX_HP);
+    fish.o2 = clamp(fish.o2 - 6, 0, MAX_O2);
+    fish.invuln = 0.45;
+    applyTrashEffect(t);
+  }
+
+  // Boss Spawn / Swallow
+  function bossSpawn() {
+    boss.active = true;
+    boss.spawned = true;
+    boss.warningTimer = 3.0;
+    boss.x = W + 40;
+    boss.y = clamp(fish.y + randi(-30, 30), 28, H-28);
+    boss.facing = -1;
+    boss.speed = fish.speedBase * 0.45;
+    boss.fishHits = 0;
+    boss.restTimer = 0;
+    boss.swallowT = 0;
+    boss.forceSwallow = false;
+  }
+
+  function triggerSwallowLose() {
+    if (!boss.spawned) bossSpawn();
+    boss.active = true;
+    boss.forceSwallow = true;
+    fish.hp = 0;
+    fish.swallowed = true;
+    boss.swallowT = 0;
+  }
+
+  // Boss Update (25% max HP per hit)
+  function bossUpdate(dt) {
+    if (!boss.active) return;
+
+    boss.warningTimer = Math.max(0, boss.warningTimer - dt);
+
+    if (fish.swallowed) {
+      boss.swallowT += dt;
+      fish.x = fish.x + (boss.x + boss.facing*18 - fish.x) * clamp(dt*3.0, 0, 1);
+      fish.y = fish.y + (boss.y + 6 - fish.y) * clamp(dt*3.0, 0, 1);
+      if (boss.swallowT > 1.2) state = "lose";
+      return;
+    }
+
+    if (boss.restTimer > 0) {
+      boss.restTimer = Math.max(0, boss.restTimer - dt);
+      return;
+    }
+
+    const dx = fish.x - boss.x;
+    const dy = fish.y - boss.y;
+    const d = Math.hypot(dx, dy) || 1;
+
+    boss.facing = (dx >= 0) ? 1 : -1;
+
+    boss.x += (dx / d) * boss.speed * dt;
+    boss.y += (dy / d) * boss.speed * dt;
+
+    boss.x = clamp(boss.x, 10, W-10);
+    boss.y = clamp(boss.y, 20, H-20);
+
+    const hitRange = 18;
+    if (dist2(boss.x, boss.y, fish.x, fish.y) < hitRange*hitRange) {
+      if (fish.invuln <= 0) {
+        fish.invuln = 0.50;
+        boss.fishHits += 1;
+        fish.hp = clamp(fish.hp - SHARK_HIT_DAMAGE, 0, MAX_HP);
+        boss.restTimer = 3.0;
+
+        if (boss.fishHits >= boss.hitsToKill || fish.hp <= 0.01) {
+          fish.hp = 0;
+          fish.swallowed = true;
+          boss.swallowT = 0;
+        }
+      }
+    }
+  }
+
+  // Main Update
+  function update(dt) {
+    if (state !== "play") return;
+
+    updateTip(dt);
+    timeLeft -= dt;
+
+    fish.blind = Math.max(0, fish.blind - dt);
+    fish.stun = Math.max(0, fish.stun - dt);
+    fish.invuln = Math.max(0, fish.invuln - dt);
+
+    if (!boss.spawned && timeLeft <= BOSS_START_AT) bossSpawn();
+
+    const ph = phase();
+
+    const o2Drain = (ph===1 ? 5.4 : ph===2 ? 6.4 : 7.4);
+    fish.o2 = clamp(fish.o2 - o2Drain*dt, 0, MAX_O2);
+
+    if (fish.o2 <= 0.01) fish.hp = clamp(fish.hp - (ph===1?7.5:ph===2?9.5:11.5)*dt, 0, MAX_HP);
+    else if (fish.o2 < 20) fish.hp = clamp(fish.hp - (ph===1?1.2:ph===2?1.6:2.2)*dt, 0, MAX_HP);
+
+    const sp = fish.speedBase * (fish.stun>0 ? 0.0 : 1.0);
+
+    let vx=0, vy=0;
+    const up = keys.has("arrowup") || keys.has("w");
+    const dn = keys.has("arrowdown") || keys.has("s");
+    const lf = keys.has("arrowleft") || keys.has("a");
+    const rt = keys.has("arrowright") || keys.has("d");
+    if (up) vy -= 1;
+    if (dn) vy += 1;
+    if (lf) vx -= 1;
+    if (rt) vx += 1;
+
+    const mag = Math.hypot(vx,vy) || 1;
+    vx = (vx/mag)*sp;
+    vy = (vy/mag)*sp;
+
+    if (vx < -0.1) fish.facing = -1;
+    if (vx > 0.1) fish.facing = 1;
+
+    const oldX=fish.x, oldY=fish.y;
+    if (!fish.swallowed) {
+      fish.x += vx*dt;
+      fish.y += vy*dt;
+    }
+
+    applyCurrents(dt);
+
+    fish.x = clamp(fish.x, 8, W-8);
+    fish.y = clamp(fish.y, 18, H-8);
+
+    resolveFishVsRocks(oldX, oldY);
+
+    plantO2(dt);
+    bloomO2(dt);
+    dirtyEffect(dt);
+    updateCamping(dt);
+
+    if (fish.o2 >= 99.5) fish.hp = clamp(fish.hp + HP_REGEN_AT_FULL_O2*dt, 0, MAX_HP);
+
+    tBubble -= dt; tFood -= dt; tTrash -= dt; tDirty -= dt; tCurrent -= dt; tBloom -= dt; tPlantMove -= dt;
+
+    const bubbleRate = 0.95;
+    const foodRate   = 3.2;
+    const trashRate  = ((ph===1 ? 1.20 : ph===2 ? 1.05 : 0.95) * 1.15);
+    const dirtyRate  = (ph===1 ? 7.5  : ph===2 ? 6.5  : 5.8);
+    const currentRate= (ph===1 ? 12.0 : ph===2 ? 11.0 : 10.0);
+    const bloomRate  = (ph===1 ? 11.0 : ph===2 ? 10.0 : 9.0);
+    const plantMoveRate = 16.0;
+
+    if (tBubble <= 0) { tBubble = randf(0.45, bubbleRate); spawnBubble(); }
+    if (tFood   <= 0) { tFood   = randf(1.6, foodRate);    spawnFood(); }
+    if (tTrash  <= 0) { tTrash  = randf(0.55, trashRate);  spawnTrash(); }
+    if (tDirty  <= 0) { tDirty  = randf(3.2, dirtyRate);   spawnDirty(); }
+    if (tCurrent<= 0) { tCurrent= randf(5.5, currentRate); spawnCurrent(); }
+    if (tBloom  <= 0) { tBloom  = randf(4.8, bloomRate);   spawnBloom(); }
+    if (tPlantMove <= 0) { tPlantMove = plantMoveRate; movePlantsRandomly(); }
+
+    for (let i=bubbles.length-1; i>=0; i--) {
+      const b=bubbles[i];
+      b.x += b.vx*dt;
+      b.y += b.vy*dt;
+      if (dist2(fish.x, fish.y, b.x, b.y) < 22*22) {
+        fish.o2 = clamp(fish.o2 + b.value, 0, MAX_O2);
+        bubbles.splice(i,1);
+        continue;
+      }
+      if (b.y < -10 || b.x < -10 || b.x > W+10) bubbles.splice(i,1);
+    }
+
+    for (let i=foods.length-1; i>=0; i--) {
+      const f=foods[i];
+      f.x += f.vx*dt;
+      f.y += f.vy*dt;
+      if (dist2(fish.x, fish.y, f.x, f.y) < 22*22) {
+        fish.hp = clamp(fish.hp + f.value, 0, MAX_HP);
+        foods.splice(i,1);
+        continue;
+      }
+      if (f.x < -25 || f.x > W+25 || f.y < -25 || f.y > H+25) foods.splice(i,1);
+    }
+
+    for (let i=trashes.length-1; i>=0; i--) {
+      const t=trashes[i];
+      t.x += t.vx*dt;
+      t.y += t.vy*dt;
+      t.y += Math.sin((now()*3) + (t.seed%10)) * 0.20;
+      const tr = { x:t.x, y:t.y, w:t.w, h:t.h };
+      if (!fish.swallowed && aabb(fishRect(), tr)) {
+        hitTrash(t);
+        trashes.splice(i,1);
+        continue;
+      }
+      if (t.x < -80 || t.y < -60 || t.y > H+60) trashes.splice(i,1);
+    }
+
+    for (let i=dirties.length-1; i>=0; i--) {
+      const d=dirties[i];
+      d.x += d.vx*dt;
+      d.y += d.vy*dt;
+      if (d.y < 25) d.vy = Math.abs(d.vy);
+      if (d.y > H-25) d.vy = -Math.abs(d.vy);
+      d.life -= dt;
+      if (d.x < -80 || d.life <= 0) dirties.splice(i,1);
+    }
+
+    for (let i=currents.length-1; i>=0; i--) {
+      currents[i].life -= dt;
+      if (currents[i].life <= 0) currents.splice(i,1);
+    }
+
+    for (let i=blooms.length-1; i>=0; i--) {
+      const b=blooms[i];
+      b.x += b.vx*dt;
+      b.y += b.vy*dt;
+      if (b.x < 25) b.vx = Math.abs(b.vx);
+      if (b.x > W-25) b.vx = -Math.abs(b.vx);
+      if (b.y < 25) b.vy = Math.abs(b.vy);
+      if (b.y > H-25) b.vy = -Math.abs(b.vy);
+      b.life -= dt;
+      if (b.life <= 0) blooms.splice(i,1);
+    }
+
+    bossUpdate(dt);
+
+    // FIX: death is ONLY when HP is 0 (oxygen 0 is allowed)
+    const deadNow = (!fish.swallowed && (fish.hp <= 0.01));
+
+    if (deadNow) {
+      if (timeLeft <= BOSS_START_AT) {
+        loseReason = "fittest";
+        triggerSwallowLose();
+      } else {
+        loseReason = "pollution";
+        state = "lose";
+      }
+      return;
+    }
+
+    if (!fish.swallowed && timeLeft <= 0) state="win";
+  }
+
+  // Render
+  function render(t) {
+    drawBackground(t);
+
+    for (const d of dirties) drawDirty(d);
+    for (const b of blooms) drawBloom(b);
+    for (const p of plants) drawPlant(p, t);
+    for (const r of rocks) drawRock(r);
+    for (const c of currents) drawCurrent(c, t);
+    for (const b of bubbles) drawBubble(b);
+    for (const f of foods) drawFood(f);
+    for (const tr of trashes) drawTrash(tr);
+
+    drawShark();
+    drawFish();
+    drawBlindOverlay();
+
+    if (state !== "menu") drawUI(t);
+
+    if (state === "menu") {
+      ctx.fillStyle="rgba(0,0,0,0.60)";
+      ctx.fillRect(0,0,W,H);
+      drawReadableText("Fish Life Adventure", W/2, 86, "#eaf6ff", 20);
+      drawReadableText("Press SPACE to start", W/2, 116, "#ffd27a", 14);
+      drawReadableText("Move: Arrow keys / WASD", W/2, 140, "#eaf6ff", 12);
+    } else if (state === "win") {
+      ctx.fillStyle="rgba(0,0,0,0.65)";
+      ctx.fillRect(0,0,W,H);
+      drawReadableText("You Win!", W/2, 78, "#b7ffcf", 22);
+      drawReadableText("Every organism needs oxygen and clean habitat to live.", W/2, 108, "#eaf6ff", 14);
+      drawReadableText("Press SPACE", W/2, 138, "#ffd27a", 14);
+    } else if (state === "lose") {
+      ctx.fillStyle="rgba(0,0,0,0.70)";
+      ctx.fillRect(0,0,W,H);
+      drawReadableText("Game Over", W/2, 78, "#ff9b9b", 22);
+
+      if (loseReason === "fittest") drawReadableText("Survival of the fittest.", W/2, 108, "#eaf6ff", 14);
+      else drawReadableText("Pollution and trash killed the fish.", W/2, 108, "#eaf6ff", 14);
+
+      drawReadableText("Press SPACE", W/2, 138, "#ffd27a", 14);
+    }
+  }
+
+  // Main Loop
+  function loop(ts) {
+    if (!lastTs) lastTs = ts;
+    const dt = clamp((ts-lastTs)/1000, 0, 0.05);
+    lastTs = ts;
+
+    if (keys.has(" ")) {
+      keys.delete(" ");
+      if (state==="menu") { resetGame(); state="play"; }
+      else if (state==="win" || state==="lose") state="menu";
+    }
+
+    if (state==="play") update(dt);
+    else updateTip(dt);
+
+    render(ts/1000);
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
