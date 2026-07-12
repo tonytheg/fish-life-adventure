@@ -2,109 +2,108 @@
 
 # 🐟 Fish Life Adventure
 
-**A pixel-art ocean survival game built with HTML5 Canvas and vanilla JavaScript**
+**An educational aquarium ecosystem game built with HTML5 Canvas and vanilla JavaScript**
 
 [![Play Now](https://img.shields.io/badge/🎮_Play_Now-Live_Demo-667eea?style=for-the-badge)](https://tonytheg.github.io/fish-life-adventure/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-Vanilla-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
 [![HTML5 Canvas](https://img.shields.io/badge/HTML5-Canvas-E34F26?style=flat-square&logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-<br/>
-
-*Survive the ocean depths. Eat smaller fish. Grow bigger. Evolve.*
+*Keep a fish healthy by finding oxygen, avoiding pollution, and caring for its habitat.*
 
 </div>
+
+---
+
+## 🌎 About the Game
+
+**Fish Life Adventure** is an educational game for elementary and middle school students. You guide one fish through an aquarium and learn how environmental conditions affect living things.
+
+Swim through clean water, collect oxygen bubbles near plants, and avoid polluted water and floating trash. Plants and oxygen sources help the fish recover, while pollution and debris reduce its health and oxygen. The goal is to keep the fish alive until the timer ends.
+
+### Learning Focus
+
+- 🌱 **Earth and life science** — A healthy habitat is necessary for life.
+- 💧 **Ecosystem awareness** — Pollution changes the conditions organisms need to survive.
+- 💻 **Digital literacy** — Players learn through interactive feedback, health, oxygen, and time indicators.
 
 ---
 
 ## 🎮 Gameplay
 
-You start as a tiny fish in a vast ocean. Your goal is to **eat fish smaller than you** to grow, while **avoiding predators** that are larger. As you grow, you'll evolve through multiple life stages and unlock the ability to take on bigger prey.
+The fish begins in an aquarium with plants, oxygen bubbles, moving water, polluted areas, and floating trash. Use clean areas and plants to maintain oxygen; avoid hazards that drain health and oxygen.
+
+The game ends when the three-minute timer finishes or when the fish loses all health. The end screen reinforces the connection between clean habitats and survival.
 
 ### Controls
+
 | Key | Action |
 |-----|--------|
-| `↑` `↓` `←` `→` | Move your fish |
-| `Space` | To start |
+| `↑` `↓` `←` `→` or `W` `A` `S` `D` | Swim |
+| `Space` | Start or restart the game |
 
-### Features
-- 🎨 **Pixel-art graphics** — Retro-style visuals with smooth animations
-- 🌊 **Dynamic ocean environment** — Scrolling backgrounds with depth layers
-- 🏆 **Score tracking** — Track your survival time and fish eaten
-- ⚡ **Dash mechanic** — Boost to catch prey or escape predators
-- 🎵 **Responsive design** — Scales to fit any screen size
+### Environmental Conditions
+
+- 🫧 **Oxygen bubbles and plants** replenish oxygen.
+- 🌊 **Clean water** provides a safer place to explore.
+- ☁️ **Polluted water** lowers oxygen and health.
+- 🗑️ **Floating trash** damages the fish and can create additional hazards.
+- ❤️ **Health and oxygen bars** give immediate feedback about the fish's condition.
 
 ---
 
-## 🚀 Quick Start
+## ✨ Features
+
+- 🎨 Pixel-art aquarium rendered with HTML5 Canvas
+- 🫧 Interactive oxygen, plant, pollution, and trash systems
+- ❤️ Health and oxygen management with a timed survival goal
+- 💬 Contextual tips and clear start, win, and game-over states
+- 🖥️ Single-file browser game with no build step or external dependencies
+
+---
+
+## 🚀 Play or Run Locally
 
 ### Play Online
-👉 **[Click here to play instantly](https://tonytheg.github.io/fish-life-adventure/)** — no download required!
+
+👉 **[Play Fish Life Adventure](https://tonytheg.github.io/fish-life-adventure/)** — no download required.
 
 ### Run Locally
+
 ```bash
-# Clone the repository
 git clone https://github.com/tonytheg/fish-life-adventure.git
 cd fish-life-adventure
-
-# Open in your browser (no build step needed!)
-open index.html
-# or on Windows:
-start index.html
 ```
 
-> **Zero dependencies** — This is a single-file HTML5 game. No npm, no build tools, no framework. Just open and play.
+Open `index.html` in a browser. No installation, build tools, or framework are required.
 
 ---
 
 ## 🏗️ Technical Details
 
-### Architecture
-The entire game is built in a **single HTML file** (~900 lines) using:
+The game is implemented in a single HTML file using browser-native technology:
 
-- **HTML5 Canvas API** for rendering
-- **Vanilla JavaScript** for game logic
-- **No external dependencies** — pure browser APIs
-
-### Key Implementation Details
-- **Game Loop** — `requestAnimationFrame`-based 60fps render loop
-- **Collision Detection** — Axis-aligned bounding box (AABB) detection
-- **Entity System** — Object-oriented fish entities with individual AI behaviors
-- **Scaling** — Canvas scales 3x from 320×180 native resolution for crisp pixel art
-- **State Machine** — Menu → Playing → Game Over state management
+- **HTML5 Canvas API** for pixel-art rendering
+- **Vanilla JavaScript** for the game loop, input, state, and interactions
+- **`requestAnimationFrame`** for smooth rendering updates
+- **Axis-aligned bounding-box collision detection** for the fish and hazards
+- **A 320 × 180 canvas scaled 3×** for crisp pixel visuals
+- **A state machine** for the menu, gameplay, win, and game-over screens
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 fish-life-adventure/
-├── index.html      # Complete game (HTML + CSS + JS in one file)
-├── README.md       # This file
+├── index.html      # Complete game: HTML, CSS, and JavaScript
+├── README.md       # Project documentation
 └── LICENSE         # MIT License
 ```
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- 🐛 Report bugs via [Issues](https://github.com/tonytheg/fish-life-adventure/issues)
-- 💡 Suggest new features
-- 🔧 Submit pull requests
-
----
-
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
----
-
-<div align="center">
-
-**Made with ❤️ and JavaScript**
-
-⭐ Star this repo if you enjoyed the game!
-
-</div>
