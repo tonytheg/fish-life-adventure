@@ -25,7 +25,7 @@ You start as a tiny fish in a vast ocean. Your goal is to **eat fish smaller tha
 | Key | Action |
 |-----|--------|
 | `↑` `↓` `←` `→` | Move your fish |
-| `Space` | Dash / Boost |
+| `Space` | To start |
 
 ### Features
 - 🎨 **Pixel-art graphics** — Retro-style visuals with smooth animations
