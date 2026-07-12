@@ -30,8 +30,6 @@ You start as a tiny fish in a vast ocean. Your goal is to **eat fish smaller tha
 ### Features
 - 🎨 **Pixel-art graphics** — Retro-style visuals with smooth animations
 - 🌊 **Dynamic ocean environment** — Scrolling backgrounds with depth layers
-- 📈 **Growth system** — Eat fish to grow larger and evolve
-- 🐠 **Multiple fish types** — Different species with unique behaviors and speeds
 - 🏆 **Score tracking** — Track your survival time and fish eaten
 - ⚡ **Dash mechanic** — Boost to catch prey or escape predators
 - 🎵 **Responsive design** — Scales to fit any screen size
